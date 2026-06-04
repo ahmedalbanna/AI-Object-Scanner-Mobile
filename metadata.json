@@ -1,0 +1,6 @@
+{
+  "name": "AI Object Scanner",
+  "description": "ماسح ضوئي ذكي للكشف عن الكائنات واستخلاص الخصائص وتوليد تقارير بالذكاء الاصطناعي متكامل مع بنية معالجة الصور ومحاكاة البحث غير المتصل.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
