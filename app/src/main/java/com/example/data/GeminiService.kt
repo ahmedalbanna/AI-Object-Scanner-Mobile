@@ -75,7 +75,9 @@ data class ScannedObject(
     val careAr: String,
     val careEn: String,
     val markdownReportAr: String,
-    val markdownReportEn: String
+    val markdownReportEn: String,
+    val wikipediaUrl: String? = null,
+    val wikipediaSummary: String? = null
 )
 
 data class ScanResultJson(

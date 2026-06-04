@@ -23,7 +23,11 @@ data class DbReport(
     val care: String = "",
     
     // Coordinates overlay if available (for drawing boxes on saved scan)
-    val boundingBox: String? = null // Format: "ymin,xmin,ymax,xmax"
+    val boundingBox: String? = null, // Format: "ymin,xmin,ymax,xmax"
+    
+    // External knowledge base integration fields
+    val wikipediaUrl: String? = null,
+    val wikipediaSummary: String? = null
 )
 
 @Dao

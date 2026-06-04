@@ -119,6 +119,86 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     /**
      * Executes the cloud Gemini analysis OR fallback local simulation based on parameters
      */
+    /**
+     * Enriches scan results with Wikipedia articles for highly confident targets (>= 70%)
+     */
+    private suspend fun enrichWithWikipedia(scanResult: ScanResultJson?): ScanResultJson? {
+        if (scanResult == null) return null
+        
+        val enrichedObjects = scanResult.objects.map { obj ->
+            if (obj.confidence >= 70.0) {
+                var updatedMarkdownEn = obj.markdownReportEn
+                var updatedMarkdownAr = obj.markdownReportAr
+                var finalWikiUrl: String? = null
+                var finalWikiSummary: String? = null
+                
+                // Fetch English Wikipedia details
+                try {
+                    val enResult = WikipediaClient.fetchSummaryAndUrl(obj.nameEn, useArabic = false)
+                    if (enResult != null) {
+                        val (title, extract, url) = enResult
+                        finalWikiUrl = url
+                        finalWikiSummary = extract
+                        
+                        updatedMarkdownEn = """
+                            $updatedMarkdownEn
+                            
+                            ---
+                            ### 🌐 External Knowledge (Wikipedia)
+                            **_${title}_**
+                            
+                            $extract
+                            
+                            [Read full article on Wikipedia]($url)
+                        """.trimIndent()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error fetching English Wikipedia info for ${obj.nameEn}", e)
+                }
+                
+                // Fetch Arabic Wikipedia details
+                try {
+                    val arResult = WikipediaClient.fetchSummaryAndUrl(obj.nameAr, useArabic = true)
+                    if (arResult != null) {
+                        val (title, extract, url) = arResult
+                        if (_isArabic.value || finalWikiUrl == null) {
+                            finalWikiUrl = url
+                            finalWikiSummary = extract
+                        }
+                        
+                        updatedMarkdownAr = """
+                            $updatedMarkdownAr
+                            
+                            ---
+                            ### 🌐 مصادر المعرفة الخارجية (ويكيبيديا)
+                            **_${title}_**
+                            
+                            $extract
+                            
+                            [اقرأ المقالة الكاملة على ويكيبيديا]($url)
+                        """.trimIndent()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error fetching Arabic Wikipedia info for ${obj.nameAr}", e)
+                }
+                
+                obj.copy(
+                    markdownReportEn = updatedMarkdownEn,
+                    markdownReportAr = updatedMarkdownAr,
+                    wikipediaUrl = finalWikiUrl,
+                    wikipediaSummary = finalWikiSummary
+                )
+            } else {
+                obj
+            }
+        }
+        
+        return scanResult.copy(objects = enrichedObjects)
+    }
+
+    /**
+     * Executes the cloud Gemini analysis OR fallback local simulation based on parameters
+     */
     fun runIntelligentScan(forceOffline: Boolean = false) {
         val bitmap = _currentBitmap.value
         if (bitmap == null) {
@@ -140,14 +220,17 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 if (result != null) {
+                    // Enrich result with Wikipedia (FR-004) before updating UI state and saving!
+                    val enrichedResult = enrichWithWikipedia(result) ?: result
+                    
                     // Success! Store findings & update states
-                    _scanResult.value = result
+                    _scanResult.value = enrichedResult
                     _status.value = ScanStatus.SUCCESS
-                    if (result.objects.isNotEmpty()) {
-                        _selectedObject.value = result.objects.first()
+                    if (enrichedResult.objects.isNotEmpty()) {
+                        _selectedObject.value = enrichedResult.objects.first()
                         
                         // Automatically save this scan report to DB for history (FR-005.1)
-                        saveReportToDatabase(bitmap, result)
+                        saveReportToDatabase(bitmap, enrichedResult)
                     }
                 } else {
                     // Fallback locally as required by NFR-008 (Offline Mode / Missing keys)
@@ -155,16 +238,20 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     val offlineResult = withContext(Dispatchers.Default) {
                         OfflineSimulator.analyzeOffline(bitmap)
                     }
-                    _scanResult.value = offlineResult
+                    
+                    // Live Wikipedia lookup if internet is active during local simulation
+                    val enrichedOffline = enrichWithWikipedia(offlineResult) ?: offlineResult
+                    
+                    _scanResult.value = enrichedOffline
                     _status.value = ScanStatus.SUCCESS
                     _errorMessage.value = if (_isArabic.value) {
                         "تم تفعيل المعالجة المحلية على الهاتف لعدم توفر خادم سحابي"
                     } else {
                         "On-device processing active (unavailable Cloud connection)"
                     }
-                    if (offlineResult.objects.isNotEmpty()) {
-                        _selectedObject.value = offlineResult.objects.first()
-                        saveReportToDatabase(bitmap, offlineResult)
+                    if (enrichedOffline.objects.isNotEmpty()) {
+                        _selectedObject.value = enrichedOffline.objects.first()
+                        saveReportToDatabase(bitmap, enrichedOffline)
                     }
                 }
             } catch (e: Exception) {
@@ -210,11 +297,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                 scanTitle = if (_isArabic.value) "مسح مُدرج: ${preset.nameAr}" else "Preset: ${preset.nameEn}",
                 objects = listOf(preset)
             )
-            _scanResult.value = result
-            _status.value = ScanStatus.SUCCESS
-            _selectedObject.value = preset
             
-            saveReportToDatabase(bitmap, result)
+            // Enrich presets too
+            val enrichedResult = enrichWithWikipedia(result) ?: result
+            
+            _scanResult.value = enrichedResult
+            _status.value = ScanStatus.SUCCESS
+            _selectedObject.value = enrichedResult.objects.firstOrNull() ?: preset
+            
+            saveReportToDatabase(bitmap, enrichedResult)
         }
     }
 
@@ -287,7 +378,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     weight = primaryObj.weightAr,
                     uses = primaryObj.usesAr,
                     care = primaryObj.careAr,
-                    boundingBox = "${primaryObj.ymin},${primaryObj.xmin},${primaryObj.ymax},${primaryObj.xmax}"
+                    boundingBox = "${primaryObj.ymin},${primaryObj.xmin},${primaryObj.ymax},${primaryObj.xmax}",
+                    wikipediaUrl = primaryObj.wikipediaUrl,
+                    wikipediaSummary = primaryObj.wikipediaSummary
                 )
 
                 repository.insertReport(report)

@@ -887,6 +887,15 @@ fun ObjectInformationSummaryCard(obj: ScannedObject, isArabic: Boolean, dateText
                 )
             }
 
+            if (!obj.wikipediaUrl.isNullOrBlank() && !obj.wikipediaSummary.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                WikipediaNativeCard(
+                    url = obj.wikipediaUrl,
+                    summary = obj.wikipediaSummary,
+                    isArabic = isArabic
+                )
+            }
+
             Spacer(modifier = Modifier.height(20.dp))
 
             // Sleek CTA export button (FR-004.3) with elegant 56.dp height
@@ -926,6 +935,101 @@ fun ObjectInformationSummaryCard(obj: ScannedObject, isArabic: Boolean, dateText
                     text = if (isArabic) "مشاركة وتصدير التقرير (JSON/TXT)" else "Export Structured Report",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun WikipediaNativeCard(url: String, summary: String, isArabic: Boolean) {
+    val context = LocalContext.current
+    
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.04f)
+        ),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            1.dp, 
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("wikipedia_native_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Language,
+                        contentDescription = "Wikipedia icon",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isArabic) "موسوعة ويكيبيديا" else "Wikipedia Encyclopedia",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "مصدر خارجي" else "INTEGRATION",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(10.dp))
+            
+            Text(
+                text = summary,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            OutlinedButton(
+                onClick = {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e("WikipediaNativeCard", "Error opening link: ", e)
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.OpenInNew,
+                    contentDescription = "Open Link",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isArabic) "اقرأ المقالة الكاملة" else "Read Full Article",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -1414,6 +1518,15 @@ fun HistoryReportDetailScreen(report: DbReport, isArabic: Boolean, onBack: () ->
                         fontSize = 12.sp,
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    )
+                }
+
+                if (!report.wikipediaUrl.isNullOrBlank() && !report.wikipediaSummary.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    WikipediaNativeCard(
+                        url = report.wikipediaUrl,
+                        summary = report.wikipediaSummary,
+                        isArabic = isArabic
                     )
                 }
 
