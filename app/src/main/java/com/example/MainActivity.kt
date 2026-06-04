@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.DbReport
@@ -72,6 +73,26 @@ import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executor
+
+fun getCategoryIconResId(category: String?): Int? {
+    if (category == null) return null
+    val c = category.lowercase(Locale.getDefault())
+    return when {
+        c.contains("electronic") || c.contains("إلكترونيات") || c.contains("كمبيوتر") || c.contains("هاتف") || c.contains("جهاز") || c.contains("أجهزة") -> {
+            R.drawable.img_category_electronics_1780615644966
+        }
+        c.contains("plant") || c.contains("botany") || c.contains("نبات") || c.contains("بيئة") || c.contains("بيئية") || c.contains("زهور") || c.contains("أشجار") -> {
+            R.drawable.img_category_plants_1780615664207
+        }
+        c.contains("kitchen") || c.contains("mug") || c.contains("cup") || c.contains("ware") || c.contains("مطبخ") || c.contains("أواني") || c.contains("كوب") || c.contains("صحن") -> {
+            R.drawable.img_category_kitchen_1780615679526
+        }
+        c.contains("education") || c.contains("book") || c.contains("publication") || c.contains("study") || c.contains("كتب") || c.contains("كتاب") || c.contains("مطبوعات") || c.contains("دراسة") -> {
+            R.drawable.img_category_books_1780615696046
+        }
+        else -> null
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -776,10 +797,24 @@ fun ObjectInformationSummaryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val categoryIcon = getCategoryIconResId(obj.categoryEn)
+                if (categoryIcon != null) {
+                    Image(
+                        painter = painterResource(id = categoryIcon),
+                        contentDescription = "Category icon",
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = if (isArabic) obj.nameAr else obj.nameEn,
-                        fontSize = 22.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -1424,12 +1459,22 @@ fun SavedReportListRowItem(report: DbReport, isArabic: Boolean, onClick: () -> U
                         )
                     }
                 } else {
-                    Icon(
-                        imageVector = Icons.Default.InsertPhoto,
-                        contentDescription = "Blank",
-                        tint = Color.Gray,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    val categoryIcon = getCategoryIconResId(report.category)
+                    if (categoryIcon != null) {
+                        Image(
+                            painter = painterResource(id = categoryIcon),
+                            contentDescription = "Category icon",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.InsertPhoto,
+                            contentDescription = "Blank",
+                            tint = Color.Gray,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                 }
             }
 
@@ -1576,18 +1621,40 @@ fun HistoryReportDetailScreen(report: DbReport, isArabic: Boolean, onBack: () ->
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                Text(
-                    text = report.title,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "${if (isArabic) "الفئة ومعدل الثقة:" else "Category & Confidence:"} ${report.category} (${report.confidence.toInt()}% ${if (isArabic) "ثقة" else "Confidence"})",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val categoryIcon = getCategoryIconResId(report.category)
+                    if (categoryIcon != null) {
+                        Image(
+                            painter = painterResource(id = categoryIcon),
+                            contentDescription = "Category icon",
+                            modifier = Modifier
+                                            .padding(end = 12.dp)
+                                            .size(54.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = report.title,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${if (isArabic) "الفئة ومعدل الثقة:" else "Category & Confidence:"} ${report.category} (${report.confidence.toInt()}% ${if (isArabic) "ثقة" else "Confidence"})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
