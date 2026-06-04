@@ -70,6 +70,8 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import java.io.InputStream
+import java.io.File
+import android.os.Build
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executor
@@ -213,6 +215,12 @@ fun MainDashboard(viewModel: ScannerViewModel, isArabic: Boolean) {
                         onDelete = {
                             viewModel.deleteReport(selectedHistoryReport!!.id)
                             viewModel.setViewingHistoryReport(null)
+                        },
+                        onAudioRecorded = { newPath ->
+                            viewModel.updateReportAudioPath(selectedHistoryReport!!.id, newPath)
+                        },
+                        onAudioDeleted = {
+                            viewModel.updateReportAudioPath(selectedHistoryReport!!.id, null)
                         }
                     )
                 } else {
@@ -681,11 +689,30 @@ fun ScannerTab(viewModel: ScannerViewModel, isArabic: Boolean) {
 
                 selectedObject?.let { obj ->
                     val mainResult by viewModel.scanResult.collectAsStateWithLifecycle()
+                    val savedReports by viewModel.savedReports.collectAsStateWithLifecycle()
+                    val scannedReportId by viewModel.scannedReportId.collectAsStateWithLifecycle()
+                    
+                    val currentScannedReportSaved = remember(savedReports, scannedReportId) {
+                        savedReports.find { it.id == scannedReportId }
+                    }
+                    val scannedAudioPath = currentScannedReportSaved?.audioPath
+
                     ObjectInformationSummaryCard(
                         obj = obj, 
                         isArabic = isArabic, 
                         dateText = getFormattedDate(),
-                        googleSearchSources = mainResult?.googleSearchSources
+                        googleSearchSources = mainResult?.googleSearchSources,
+                        audioPath = scannedAudioPath,
+                        onAudioRecorded = { newAudioPath ->
+                            scannedReportId?.let { id ->
+                                viewModel.updateReportAudioPath(id, newAudioPath)
+                            }
+                        },
+                        onAudioDeleted = {
+                            scannedReportId?.let { id ->
+                                viewModel.updateReportAudioPath(id, null)
+                            }
+                        }
                     )
                 }
             }
@@ -756,7 +783,10 @@ fun ObjectInformationSummaryCard(
     obj: ScannedObject, 
     isArabic: Boolean, 
     dateText: String, 
-    googleSearchSources: List<GoogleSearchSource>? = null
+    googleSearchSources: List<GoogleSearchSource>? = null,
+    audioPath: String? = null,
+    onAudioRecorded: ((String) -> Unit)? = null,
+    onAudioDeleted: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     
@@ -949,6 +979,16 @@ fun ObjectInformationSummaryCard(
                     url = obj.wikipediaUrl,
                     summary = obj.wikipediaSummary,
                     isArabic = isArabic
+                )
+            }
+
+            if (onAudioRecorded != null && onAudioDeleted != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                AudioNotesRecorderPlayer(
+                    audioPath = audioPath,
+                    isArabic = isArabic,
+                    onAudioRecorded = onAudioRecorded,
+                    onAudioDeleted = onAudioDeleted
                 )
             }
 
@@ -1536,7 +1576,14 @@ fun SavedReportListRowItem(report: DbReport, isArabic: Boolean, onClick: () -> U
 
 // --- Historical Report Expanded Frame View ---
 @Composable
-fun HistoryReportDetailScreen(report: DbReport, isArabic: Boolean, onBack: () -> Unit, onDelete: () -> Unit) {
+fun HistoryReportDetailScreen(
+    report: DbReport, 
+    isArabic: Boolean, 
+    onBack: () -> Unit, 
+    onDelete: () -> Unit,
+    onAudioRecorded: (String) -> Unit,
+    onAudioDeleted: () -> Unit
+) {
     val context = LocalContext.current
     val googleSearchSources = remember(report.googleSearchSourcesJson) {
         try {
@@ -1762,6 +1809,14 @@ fun HistoryReportDetailScreen(report: DbReport, isArabic: Boolean, onBack: () ->
                     )
                 }
 
+                Spacer(modifier = Modifier.height(16.dp))
+                AudioNotesRecorderPlayer(
+                    audioPath = report.audioPath,
+                    isArabic = isArabic,
+                    onAudioRecorded = onAudioRecorded,
+                    onAudioDeleted = onAudioDeleted
+                )
+
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Modern 54.dp button matching primary styling
@@ -1909,3 +1964,484 @@ fun CameraPreviewWindow(
         }
     }
 }
+
+// --- Dynamic Microphone Voice Notes Recorder & Player Component ---
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun AudioNotesRecorderPlayer(
+    audioPath: String?,
+    isArabic: Boolean,
+    onAudioRecorded: (String) -> Unit,
+    onAudioDeleted: () -> Unit
+) {
+    val context = LocalContext.current
+    
+    val permissionState = rememberPermissionState(
+        android.Manifest.permission.RECORD_AUDIO
+    )
+    
+    var isRecording by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableStateOf(0) }
+    
+    var isPlaying by remember { mutableStateOf(false) }
+    var playPosition by remember { mutableStateOf(0f) }
+    var totalDuration by remember { mutableStateOf(1) }
+    
+    var mediaRecorder: android.media.MediaRecorder? by remember { mutableStateOf(null) }
+    var mediaPlayer: android.media.MediaPlayer? by remember { mutableStateOf(null) }
+    var activeRecordFile: File? by remember { mutableStateOf(null) }
+    
+    // Tickers for recording duration
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            recordingSeconds = 0
+            while (isRecording) {
+                kotlinx.coroutines.delay(1000)
+                recordingSeconds++
+            }
+        }
+    }
+    
+    // Tickers for audio playback tracking
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            while (isPlaying) {
+                mediaPlayer?.let { player ->
+                    try {
+                        if (player.isPlaying) {
+                            playPosition = player.currentPosition.toFloat()
+                            totalDuration = player.duration.coerceAtLeast(1)
+                        } else {
+                            isPlaying = false
+                        }
+                    } catch (e: Exception) {
+                        isPlaying = false
+                    }
+                }
+                kotlinx.coroutines.delay(100)
+            }
+        }
+    }
+    
+    // Clean resources on disposal
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+            } catch (_: Exception) {}
+            try {
+                mediaRecorder?.stop()
+                mediaRecorder?.release()
+            } catch (_: Exception) {}
+        }
+    }
+    
+    fun startRecordingAudio() {
+        try {
+            val file = File(context.filesDir, "spoken_note_${System.currentTimeMillis()}.m4a")
+            activeRecordFile = file
+            
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                android.media.MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                android.media.MediaRecorder()
+            }
+            
+            recorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            recorder.setOutputFile(file.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            
+            mediaRecorder = recorder
+            isRecording = true
+        } catch (e: Exception) {
+            Log.e("AudioRecorder", "Recording initiation failed", e)
+            android.widget.Toast.makeText(
+                context, 
+                if (isArabic) "فشل بدء التسجيل، تأكد من سلامة كارت الصوت أو إذن الميكروفون" 
+                else "Failed to initialize mic recording.", 
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    
+    fun stopRecordingAudio(save: Boolean) {
+        try {
+            mediaRecorder?.apply {
+                stop()
+                release()
+            }
+        } catch (e: Exception) {
+            Log.e("AudioRecorder", "Error stopping recorder", e)
+        } finally {
+            mediaRecorder = null
+            isRecording = false
+        }
+        
+        if (save) {
+            activeRecordFile?.let { file ->
+                if (file.exists() && file.length() > 0) {
+                    onAudioRecorded(file.absolutePath)
+                }
+            }
+        }
+    }
+    
+    fun startPlayingAudio(path: String) {
+        try {
+            mediaPlayer?.release()
+            val player = android.media.MediaPlayer().apply {
+                setDataSource(path)
+                prepare()
+                setOnCompletionListener {
+                    isPlaying = false
+                    playPosition = 0f
+                }
+                start()
+            }
+            mediaPlayer = player
+            totalDuration = player.duration.coerceAtLeast(1)
+            isPlaying = true
+        } catch (e: Exception) {
+            Log.e("AudioPlayer", "Error starting playback", e)
+            android.widget.Toast.makeText(
+                context, 
+                if (isArabic) "فشل تشغيل المقطع الصوتي المسجل" else "Playback failed.", 
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+    
+    fun pausePlayingAudio() {
+        try {
+            mediaPlayer?.let {
+                if (it.isPlaying) {
+                    it.pause()
+                }
+                isPlaying = false
+            }
+        } catch (e: Exception) {
+            Log.e("AudioPlayer", "Error pausing playback", e)
+        }
+    }
+    
+    fun resumePlayingAudio() {
+        try {
+            mediaPlayer?.let {
+                it.start()
+                isPlaying = true
+            }
+        } catch (e: Exception) {
+            Log.e("AudioPlayer", "Error resuming playback", e)
+        }
+    }
+    
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.04f)
+        ),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            1.dp, 
+            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("audio_notes_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header row with mic icon and title
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "Microphone icon",
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isArabic) "المذكرة والتفسيرات الصوتية" else "Spoken Voice Commentary",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "ملاحظة صوتية" else "VOICE NOTE",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            if (audioPath.isNullOrBlank()) {
+                if (isRecording) {
+                    // Recording screen visual feedback
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            // Infinite Pulsing Animation for Red Dot
+                            val infiniteTransition = rememberInfiniteTransition()
+                            val pulseAlpha by infiniteTransition.animateFloat(
+                                initialValue = 0.3f,
+                                targetValue = 1.0f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(800, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                )
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Red.copy(alpha = pulseAlpha))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isArabic) "جاري تسجيل تعليقك الصوتي الفوري..." else "Recording acoustic note live...",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Red
+                            )
+                        }
+                        
+                        // Sleek wave bar elements
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 14.dp)
+                        ) {
+                            val waveBars = listOf(15, 28, 42, 20, 32, 54, 25, 40, 15, 12, 30, 48, 22, 16)
+                            waveBars.forEach { baseHeight ->
+                                val scale = remember { mutableStateOf(1f) }
+                                LaunchedEffect(Unit) {
+                                    while (true) {
+                                        scale.value = (5..15).random() / 10f
+                                        kotlinx.coroutines.delay(120)
+                                    }
+                                }
+                                val barHeight = (baseHeight * scale.value).coerceIn(6f, 64f).dp
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 2.5.dp)
+                                        .width(5.dp)
+                                        .height(barHeight)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(MaterialTheme.colorScheme.tertiary)
+                                )
+                            }
+                        }
+                        
+                        val minutes = recordingSeconds / 60
+                        val seconds = recordingSeconds % 60
+                        Text(
+                            text = String.format("%02d:%02d", minutes, seconds),
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            // Cancel button
+                            OutlinedButton(
+                                onClick = { stopRecordingAudio(save = false) },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(text = if (isArabic) "إلغاء الأمر" else "Cancel")
+                            }
+                            // Save stop button
+                            Button(
+                                onClick = { stopRecordingAudio(save = true) },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = "Stop")
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(text = if (isArabic) "حفظ والتسجيل" else "Keep voice")
+                            }
+                        }
+                    }
+                } else {
+                    // Ready to Record screen
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (isArabic) 
+                                "تريد تدوين ملاحظات صوتية غنية وشرح التفاصيل منطوقة؟ انقر للبدء الفوري." 
+                                else "Add optional voice explanations or instructions accompanying this scan report.",
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(bottom = 14.dp)
+                        )
+                        
+                        Button(
+                            onClick = {
+                                if (permissionState.status.isGranted) {
+                                    startRecordingAudio()
+                                } else {
+                                    permissionState.launchPermissionRequest()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Mic, contentDescription = "Start recording")
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isArabic) "تسجيل ملاحظة صوتية" else "Record spoken note",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Audio file is available - Player screen
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (isPlaying) {
+                                    pausePlayingAudio()
+                                } else {
+                                    if (playPosition > 0f && playPosition < totalDuration) {
+                                        resumePlayingAudio()
+                                    } else {
+                                        startPlayingAudio(audioPath)
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f))
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.width(10.dp))
+                        
+                        // Playback track slider
+                        Slider(
+                            value = playPosition,
+                            onValueChange = { seekVal ->
+                                playPosition = seekVal
+                                mediaPlayer?.seekTo(seekVal.toInt())
+                            },
+                            valueRange = 0f..totalDuration.toFloat(),
+                            modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.tertiary,
+                                activeTrackColor = MaterialTheme.colorScheme.tertiary,
+                                inactiveTrackColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f)
+                            )
+                        )
+                        
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        // Delete Button
+                        IconButton(
+                            onClick = {
+                                try {
+                                    mediaPlayer?.stop()
+                                    mediaPlayer?.release()
+                                } catch (_: Exception) {}
+                                mediaPlayer = null
+                                isPlaying = false
+                                
+                                val f = File(audioPath)
+                                if (f.exists()) {
+                                    f.delete()
+                                }
+                                onAudioDeleted()
+                            },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete voice note",
+                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // Duration text counters
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val currentSecs = (playPosition / 1000).toInt()
+                        val totalSecs = (totalDuration / 1000).toInt()
+                        
+                        Text(
+                            text = String.format("%02d:%02d", currentSecs / 60, currentSecs % 60),
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+                        
+                        Text(
+                            text = String.format("%02d:%02d", totalSecs / 60, totalSecs % 60),
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

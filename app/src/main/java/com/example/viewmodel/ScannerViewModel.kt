@@ -51,6 +51,9 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
     private val _showOnlyOffline = MutableStateFlow(false)
     val showOnlyOffline: StateFlow<Boolean> = _showOnlyOffline.asStateFlow()
 
+    private val _scannedReportId = MutableStateFlow<Long?>(null)
+    val scannedReportId: StateFlow<Long?> = _scannedReportId.asStateFlow()
+
     // --- Search & History states ---
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -103,6 +106,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         _scanResult.value = null
         _errorMessage.value = null
         _selectedObject.value = null
+        _scannedReportId.value = null
     }
 
     /**
@@ -114,6 +118,7 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
         _scanResult.value = null
         _errorMessage.value = null
         _selectedObject.value = null
+        _scannedReportId.value = null
     }
 
     /**
@@ -393,7 +398,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     googleSearchSourcesJson = serializedSources
                 )
 
-                repository.insertReport(report)
+                val insertedId = repository.insertReport(report)
+                _scannedReportId.value = insertedId
             } catch (e: Exception) {
                 Log.e(TAG, "Error saving scanned record inside Room database: ", e)
             }
@@ -408,6 +414,20 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
             repository.deleteReportById(id)
             if (_viewingHistoryReport.value?.id == id) {
                 _viewingHistoryReport.value = null
+            }
+        }
+    }
+
+    /**
+     * Updates the audio path of a report in the database, syncing the active detail view
+     */
+    fun updateReportAudioPath(reportId: Long, audioPath: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAudioPath(reportId, audioPath)
+            
+            val currentViewing = _viewingHistoryReport.value
+            if (currentViewing != null && currentViewing.id == reportId) {
+                _viewingHistoryReport.value = currentViewing.copy(audioPath = audioPath)
             }
         }
     }

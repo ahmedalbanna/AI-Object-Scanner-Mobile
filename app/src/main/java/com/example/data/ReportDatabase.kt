@@ -30,7 +30,10 @@ data class DbReport(
     val wikipediaSummary: String? = null,
     
     // Google Search Grounding sources serialized as JSON
-    val googleSearchSourcesJson: String? = null
+    val googleSearchSourcesJson: String? = null,
+    
+    // Spoken voice notes path associated with report
+    val audioPath: String? = null
 )
 
 @Dao
@@ -44,6 +47,12 @@ interface ReportDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReport(report: DbReport): Long
 
+    @Update
+    suspend fun updateReport(report: DbReport)
+
+    @Query("UPDATE scan_reports SET audioPath = :audioPath WHERE id = :id")
+    suspend fun updateAudioPath(id: Long, audioPath: String?)
+
     @Query("DELETE FROM scan_reports WHERE id = :id")
     suspend fun deleteReportById(id: Long)
 
@@ -51,7 +60,7 @@ interface ReportDao {
     suspend fun deleteReport(report: DbReport)
 }
 
-@Database(entities = [DbReport::class], version = 1, exportSchema = false)
+@Database(entities = [DbReport::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun reportDao(): ReportDao
 
@@ -82,6 +91,14 @@ class ReportRepository(private val reportDao: ReportDao) {
 
     suspend fun insertReport(report: DbReport): Long {
         return reportDao.insertReport(report)
+    }
+
+    suspend fun updateReport(report: DbReport) {
+        reportDao.updateReport(report)
+    }
+
+    suspend fun updateAudioPath(id: Long, audioPath: String?) {
+        reportDao.updateAudioPath(id, audioPath)
     }
 
     suspend fun deleteReportById(id: Long) {
