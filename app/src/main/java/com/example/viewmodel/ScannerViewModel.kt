@@ -365,6 +365,15 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     ${primaryObj.markdownReportEn}
                 """.trimIndent()
 
+                val sourcesList = response.googleSearchSources ?: emptyList()
+                val serializedSources = if (sourcesList.isNotEmpty()) {
+                    val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, GoogleSearchSource::class.java)
+                    val adapter = GeminiClient.moshi.adapter<List<GoogleSearchSource>>(listType)
+                    adapter.toJson(sourcesList)
+                } else {
+                    null
+                }
+
                 val report = DbReport(
                     timestamp = System.currentTimeMillis(),
                     title = primaryObj.nameAr,
@@ -380,7 +389,8 @@ class ScannerViewModel(application: Application) : AndroidViewModel(application)
                     care = primaryObj.careAr,
                     boundingBox = "${primaryObj.ymin},${primaryObj.xmin},${primaryObj.ymax},${primaryObj.xmax}",
                     wikipediaUrl = primaryObj.wikipediaUrl,
-                    wikipediaSummary = primaryObj.wikipediaSummary
+                    wikipediaSummary = primaryObj.wikipediaSummary,
+                    googleSearchSourcesJson = serializedSources
                 )
 
                 repository.insertReport(report)

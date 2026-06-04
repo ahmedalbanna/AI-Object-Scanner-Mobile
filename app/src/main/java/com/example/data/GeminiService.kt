@@ -38,14 +38,38 @@ data class GenerationConfig(
     val temperature: Float? = null
 )
 
+data class GoogleSearchRetrieval(
+    val dynamicRetrievalConfig: String? = null
+)
+
+data class Tool(
+    val googleSearchRetrieval: GoogleSearchRetrieval? = null
+)
+
 data class GenerateContentRequest(
     val contents: List<Content>,
     val generationConfig: GenerationConfig? = null,
-    val systemInstruction: Content? = null
+    val systemInstruction: Content? = null,
+    val tools: List<Tool>? = null
+)
+
+data class WebSource(
+    val uri: String? = null,
+    val title: String? = null
+)
+
+data class GroundingChunk(
+    val web: WebSource? = null
+)
+
+data class GroundingMetadata(
+    val webSearchQueries: List<String>? = null,
+    val groundingChunks: List<GroundingChunk>? = null
 )
 
 data class Candidate(
-    val content: Content
+    val content: Content,
+    val groundingMetadata: GroundingMetadata? = null
 )
 
 data class GenerateContentResponse(
@@ -53,6 +77,11 @@ data class GenerateContentResponse(
 )
 
 // --- Domain Models for Scanner Output ---
+
+data class GoogleSearchSource(
+    val title: String,
+    val url: String
+)
 
 data class ScannedObject(
     val nameEn: String,
@@ -82,7 +111,8 @@ data class ScannedObject(
 
 data class ScanResultJson(
     val scanTitle: String,
-    val objects: List<ScannedObject>
+    val objects: List<ScannedObject>,
+    val googleSearchSources: List<GoogleSearchSource>? = emptyList()
 )
 
 // --- Retrofit API Service Interface ---
@@ -203,7 +233,8 @@ object GeminiClient {
                 responseMimeType = "application/json",
                 temperature = 0.2f
             ),
-            systemInstruction = Content(parts = listOf(Part(text = systemPrompt)))
+            systemInstruction = Content(parts = listOf(Part(text = systemPrompt))),
+            tools = listOf(Tool(googleSearchRetrieval = GoogleSearchRetrieval()))
         )
 
         return try {
@@ -216,7 +247,20 @@ object GeminiClient {
                     .removeSuffix("```")
                     .trim()
                 val adapter = moshi.adapter(ScanResultJson::class.java)
-                adapter.fromJson(cleanJson)
+                val parsedResult = adapter.fromJson(cleanJson)
+                
+                // Extract grounding chunks/sources
+                val groundingChunks = response.candidates?.firstOrNull()?.groundingMetadata?.groundingChunks
+                val sources = groundingChunks?.mapNotNull { chunk ->
+                    val web = chunk.web
+                    if (web?.title != null && web.uri != null) {
+                        GoogleSearchSource(title = web.title, url = web.uri)
+                    } else {
+                        null
+                    }
+                } ?: emptyList()
+                
+                parsedResult?.copy(googleSearchSources = sources)
             } else {
                 Log.e(TAG, "Response candidates or parts are empty.")
                 null

@@ -27,7 +27,10 @@ data class DbReport(
     
     // External knowledge base integration fields
     val wikipediaUrl: String? = null,
-    val wikipediaSummary: String? = null
+    val wikipediaSummary: String? = null,
+    
+    // Google Search Grounding sources serialized as JSON
+    val googleSearchSourcesJson: String? = null
 )
 
 @Dao

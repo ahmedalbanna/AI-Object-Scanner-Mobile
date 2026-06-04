@@ -60,6 +60,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.DbReport
 import com.example.data.OfflineSimulator
 import com.example.data.ScannedObject
+import com.example.data.GoogleSearchSource
+import com.example.data.GeminiClient
 import com.example.ui.theme.*
 import com.example.viewmodel.ScanStatus
 import com.example.viewmodel.ScannerViewModel
@@ -657,7 +659,13 @@ fun ScannerTab(viewModel: ScannerViewModel, isArabic: Boolean) {
                 }
 
                 selectedObject?.let { obj ->
-                    ObjectInformationSummaryCard(obj = obj, isArabic = isArabic, dateText = getFormattedDate())
+                    val mainResult by viewModel.scanResult.collectAsStateWithLifecycle()
+                    ObjectInformationSummaryCard(
+                        obj = obj, 
+                        isArabic = isArabic, 
+                        dateText = getFormattedDate(),
+                        googleSearchSources = mainResult?.googleSearchSources
+                    )
                 }
             }
         }
@@ -723,7 +731,12 @@ fun SleekGridCell(label: String, value: String, icon: androidx.compose.ui.graphi
 }
 
 @Composable
-fun ObjectInformationSummaryCard(obj: ScannedObject, isArabic: Boolean, dateText: String) {
+fun ObjectInformationSummaryCard(
+    obj: ScannedObject, 
+    isArabic: Boolean, 
+    dateText: String, 
+    googleSearchSources: List<GoogleSearchSource>? = null
+) {
     val context = LocalContext.current
     
     Card(
@@ -887,6 +900,14 @@ fun ObjectInformationSummaryCard(obj: ScannedObject, isArabic: Boolean, dateText
                 )
             }
 
+            if (!googleSearchSources.isNullOrEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                GoogleSearchGroundingCard(
+                    sources = googleSearchSources,
+                    isArabic = isArabic
+                )
+            }
+
             if (!obj.wikipediaUrl.isNullOrBlank() && !obj.wikipediaSummary.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(16.dp))
                 WikipediaNativeCard(
@@ -1031,6 +1052,127 @@ fun WikipediaNativeCard(url: String, summary: String, isArabic: Boolean) {
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun GoogleSearchGroundingCard(sources: List<GoogleSearchSource>, isArabic: Boolean) {
+    if (sources.isEmpty()) return
+    val context = LocalContext.current
+    
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.04f)
+        ),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            1.dp, 
+            MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("google_search_grounding_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Google Search icon",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isArabic) "مصادر بحث جوجل الفورية" else "Google Search Live Sources",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = if (isArabic) "بحث فوري" else "LIVE GROUNDING",
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(10.dp))
+            
+            Text(
+                text = if (isArabic) 
+                    "تم تعزيز هذا التقرير وتأكيده بمعلومات حية في الوقت الفعلي عبر نتائج بحث جوجل الآتية:" 
+                    else "This report is enriched with real-time info verified through the following live Google Search sources:",
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                sources.take(4).forEach { source ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .clickable {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(source.url))
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Log.e("GroundingCard", "Error opening search source: ", e)
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = "Source",
+                                tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = source.title,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        
+                        Text(
+                            text = if (source.url.contains("wikipedia")) "Wikipedia" else {
+                                val host = android.net.Uri.parse(source.url).host ?: ""
+                                host.removePrefix("www.")
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1351,6 +1493,21 @@ fun SavedReportListRowItem(report: DbReport, isArabic: Boolean, onClick: () -> U
 @Composable
 fun HistoryReportDetailScreen(report: DbReport, isArabic: Boolean, onBack: () -> Unit, onDelete: () -> Unit) {
     val context = LocalContext.current
+    val googleSearchSources = remember(report.googleSearchSourcesJson) {
+        try {
+            val json = report.googleSearchSourcesJson
+            if (!json.isNullOrBlank()) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, GoogleSearchSource::class.java)
+                val adapter = GeminiClient.moshi.adapter<List<GoogleSearchSource>>(listType)
+                adapter.fromJson(json) ?: emptyList()
+            } else {
+                emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e("HistoryReportDetail", "Error parsing search sources: ", e)
+            emptyList()
+        }
+    }
     
     Column(
         modifier = Modifier
@@ -1518,6 +1675,14 @@ fun HistoryReportDetailScreen(report: DbReport, isArabic: Boolean, onBack: () ->
                         fontSize = 12.sp,
                         lineHeight = 18.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    )
+                }
+
+                if (!googleSearchSources.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    GoogleSearchGroundingCard(
+                        sources = googleSearchSources,
+                        isArabic = isArabic
                     )
                 }
 
